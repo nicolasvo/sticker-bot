@@ -145,7 +145,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ],
             [
                 InlineKeyboardButton(
-                    "Make sticker w/ original picture",
+                    "Use original picture",
                     callback_data=f"original_{message_id}",
                 ),
             ],
@@ -154,11 +154,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     "Send sticker as file", callback_data=f"file_{message_id}"
                 ),
             ],
-            [
-                InlineKeyboardButton(
-                    "Write what to select", callback_data=f"sam_{message_id}"
-                ),
-            ],
+            # [
+            #     InlineKeyboardButton(
+            #         "Write what to select", callback_data=f"sam_{message_id}"
+            #     ),
+            # ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
