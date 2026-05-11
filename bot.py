@@ -1,7 +1,9 @@
 import base64
 import json
+import logging
 import os
 import re
+import traceback
 
 import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
@@ -15,6 +17,12 @@ from telegram.ext import (
 
 from user import User, get_sticker_set_name
 from sticker import add_sticker, delete_sticker, make_original_image, compress_image
+
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger("bot")
 
 # Replace 'YOUR_BOT_TOKEN' with your actual bot token
 TOKEN = os.getenv("BOT_API_TOKEN")
@@ -46,7 +54,39 @@ def list_files_sam(user_id):
 async def make_async_post(url, data):
     async with aiohttp.ClientSession() as session:
         async with session.post(url, data=data) as response:
-            return await response.text()
+            text = await response.text()
+            logger.info(
+                "POST %s -> status=%s content_type=%s body_len=%d body_preview=%r",
+                url,
+                response.status,
+                response.headers.get("Content-Type"),
+                len(text),
+                text[:300],
+            )
+            return text
+
+
+def _parse_image_response(raw, context):
+    try:
+        j = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.error(
+            "%s: response is not JSON (len=%d preview=%r): %s",
+            context,
+            len(raw),
+            raw[:300],
+            e,
+        )
+        raise
+    if not isinstance(j, dict) or "image" not in j:
+        logger.error(
+            "%s: JSON missing 'image' key. keys=%s preview=%r",
+            context,
+            list(j.keys()) if isinstance(j, dict) else type(j).__name__,
+            raw[:300],
+        )
+        raise KeyError(f"{context}: response missing 'image' key")
+    return j["image"]
 
 
 async def request_rembg(input_path):
@@ -54,17 +94,14 @@ async def request_rembg(input_path):
         "image": image_to_base64(input_path),
     }
     url = os.getenv("API_URL_REMBG")
-    print("making request")
+    logger.info("request_rembg: posting %d-byte payload to %s", len(payload["image"]), url)
     try:
         r = await make_async_post(url, json.dumps(payload))
-        print("request completed")
-        j = json.loads(r)
-        image_base64 = j["image"]
-    except:
+        image_base64 = _parse_image_response(r, "request_rembg attempt 1")
+    except Exception as e:
+        logger.warning("request_rembg attempt 1 failed (%s), retrying", e)
         r = await make_async_post(url, json.dumps(payload))
-        print("request completed")
-        j = json.loads(r)
-        image_base64 = j["image"]
+        image_base64 = _parse_image_response(r, "request_rembg attempt 2")
     return image_base64
 
 
@@ -74,17 +111,14 @@ async def request_gsa(input_path, text_prompt):
         "text_prompt": text_prompt,
     }
     url = os.getenv("API_URL_GSA")
-    print("making request")
+    logger.info("request_gsa: posting %d-byte payload, prompt=%r, url=%s", len(payload["image"]), text_prompt, url)
     try:
         r = await make_async_post(url, json.dumps(payload))
-        print("request completed")
-        j = json.loads(r)
-        image_base64 = j["image"]
-    except:
+        image_base64 = _parse_image_response(r, "request_gsa attempt 1")
+    except Exception as e:
+        logger.warning("request_gsa attempt 1 failed (%s), retrying", e)
         r = await make_async_post(url, json.dumps(payload))
-        print("request completed")
-        j = json.loads(r)
-        image_base64 = j["image"]
+        image_base64 = _parse_image_response(r, "request_gsa attempt 2")
     return image_base64
 
 
@@ -133,7 +167,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await media_message.download_to_drive(input_path)
 
         try:
+            logger.info("handle_message: user=%s message_id=%s input=%s", user.id, message_id, input_path)
             image_base64 = await request_rembg(input_path)
+            logger.info("handle_message: got image_base64 len=%d", len(image_base64) if image_base64 else 0)
             base64_to_image(image_base64, output_path)
             base64_to_image(image_base64, output_png_path)
             compress_image(output_path, output_path)
@@ -150,7 +186,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 output_original_path,
             )
         except Exception as e:
-            await update.message.reply_text(str(e))
+            logger.error(
+                "handle_message failed for user=%s message_id=%s: %s\n%s",
+                user.id,
+                message_id,
+                e,
+                traceback.format_exc(),
+            )
+            await update.message.reply_text(
+                f"Something went wrong: {type(e).__name__}: {e}"
+            )
     else:
         files = list_files_sam(user.id)
         if len(files) > 0:

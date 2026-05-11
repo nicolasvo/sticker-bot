@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: .
+    image: sticker-multi
+    container_name: sticker-multi
+    restart: unless-stopped
+    env_file:
+      - .env
