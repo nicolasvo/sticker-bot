@@ -53,7 +53,9 @@ def list_files_sam(user_id):
 
 async def make_async_post(url, data):
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=data) as response:
+        async with session.post(
+            url, data=data, headers={"Content-Type": "application/json"}
+        ) as response:
             text = await response.text()
             logger.info(
                 "POST %s -> status=%s content_type=%s body_len=%d body_preview=%r",
@@ -89,36 +91,45 @@ def _parse_image_response(raw, context):
     return j["image"]
 
 
-async def request_rembg(input_path):
+async def request_birefnet(input_path):
     payload = {
         "image": image_to_base64(input_path),
     }
-    url = os.getenv("API_URL_REMBG")
-    logger.info("request_rembg: posting %d-byte payload to %s", len(payload["image"]), url)
+    url = os.getenv("API_URL_BIREFNET")
+    logger.info(
+        "request_birefnet: posting %d-byte payload, url=%s",
+        len(payload["image"]),
+        url,
+    )
     try:
         r = await make_async_post(url, json.dumps(payload))
-        image_base64 = _parse_image_response(r, "request_rembg attempt 1")
+        image_base64 = _parse_image_response(r, "request_birefnet attempt 1")
     except Exception as e:
-        logger.warning("request_rembg attempt 1 failed (%s), retrying", e)
+        logger.warning("request_birefnet attempt 1 failed (%s), retrying", e)
         r = await make_async_post(url, json.dumps(payload))
-        image_base64 = _parse_image_response(r, "request_rembg attempt 2")
+        image_base64 = _parse_image_response(r, "request_birefnet attempt 2")
     return image_base64
 
 
-async def request_gsa(input_path, text_prompt):
+async def request_grounding_dino_sam(input_path, text_prompt):
     payload = {
         "image": image_to_base64(input_path),
         "text_prompt": text_prompt,
     }
-    url = os.getenv("API_URL_GSA")
-    logger.info("request_gsa: posting %d-byte payload, prompt=%r, url=%s", len(payload["image"]), text_prompt, url)
+    url = os.getenv("API_URL_GROUNDING_DINO_SAM")
+    logger.info(
+        "request_grounding_dino_sam: posting %d-byte payload, prompt=%r, url=%s",
+        len(payload["image"]),
+        text_prompt,
+        url,
+    )
     try:
         r = await make_async_post(url, json.dumps(payload))
-        image_base64 = _parse_image_response(r, "request_gsa attempt 1")
+        image_base64 = _parse_image_response(r, "request_grounding_dino_sam attempt 1")
     except Exception as e:
-        logger.warning("request_gsa attempt 1 failed (%s), retrying", e)
+        logger.warning("request_grounding_dino_sam attempt 1 failed (%s), retrying", e)
         r = await make_async_post(url, json.dumps(payload))
-        image_base64 = _parse_image_response(r, "request_gsa attempt 2")
+        image_base64 = _parse_image_response(r, "request_grounding_dino_sam attempt 2")
     return image_base64
 
 
@@ -151,14 +162,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ],
             [
                 InlineKeyboardButton(
+                    "Select from prompt", callback_data=f"sam_{message_id}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     "Send sticker as file", callback_data=f"file_{message_id}"
                 ),
             ],
-            # [
-            #     InlineKeyboardButton(
-            #         "Write what to select", callback_data=f"sam_{message_id}"
-            #     ),
-            # ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -168,7 +179,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         try:
             logger.info("handle_message: user=%s message_id=%s input=%s", user.id, message_id, input_path)
-            image_base64 = await request_rembg(input_path)
+            image_base64 = await request_birefnet(input_path)
             logger.info("handle_message: got image_base64 len=%d", len(image_base64) if image_base64 else 0)
             base64_to_image(image_base64, output_path)
             base64_to_image(image_base64, output_png_path)
@@ -208,7 +219,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 ],
                 [
                     InlineKeyboardButton(
-                        "Write another text prompt",
+                        "Try another prompt",
                         callback_data=f"again_{message_id}",
                     ),
                 ],
@@ -219,8 +230,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 ],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            image_base64 = await request_gsa(f"/tmp/{files[0]}", update.message.text)
-            if image_base64 == "":
+            image_base64 = await request_grounding_dino_sam(
+                f"/tmp/{files[0]}", text_prompt=update.message.text
+            )
+            if not image_base64:
                 await update.message.reply_text(
                     f"'{update.message.text}' was not detected in the image.\nTry to write another text prompt 🤞"
                 )
@@ -259,11 +272,11 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if data == "sam":
         os.rename(input_path, input_sam_path)
         await query.message.reply_text(
-            "Write what you want to select from the image.\nFor example: person right, orange cat 🖖"
+            "Write what you want to select from the image.\nFor example: person, cat, hat 🖖"
         )
     elif data == "again":
         await query.message.reply_text(
-            "Write what you want to select from the image.\nFor example: person right, orange cat 🖖"
+            "Write what you want to select from the image.\nFor example: person, cat, hat 🖖"
         )
     elif data == "yes":
         if not os.path.exists(output_path):
