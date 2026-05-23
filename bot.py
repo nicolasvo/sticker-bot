@@ -272,11 +272,11 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if data == "sam":
         os.rename(input_path, input_sam_path)
         await query.message.reply_text(
-            "Write what you want to select from the image.\nFor example: person, cat, hat 🖖"
+            "Write what you want to select from the image.\nFor example: person on the right, orange cat, dog 🖖"
         )
     elif data == "again":
         await query.message.reply_text(
-            "Write what you want to select from the image.\nFor example: person, cat, hat 🖖"
+            "Write what you want to select from the image.\nFor example: person on the right, orange cat, dog 🖖"
         )
     elif data == "yes":
         if not os.path.exists(output_path):
